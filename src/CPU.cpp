@@ -207,6 +207,16 @@ uint8_t CPU::pop_stack()
 	return bus->read(0x0100 | ++stkptr);
 }
 
+uint8_t CPU::hex_to_bcd(uint8_t num) // 8位bcd转换成两位数
+{
+	return ((num >> 4) * 10 + (num & 0x0F));
+}
+
+uint8_t CPU::bcd_to_hex(uint8_t num) // 两位数转换成8位bcd
+{
+	return ((num / 10) << 4) | ((num % 10) & 0x0F);
+}
+
 void CPU::ADC()
 {
 	uint16_t data;
@@ -215,6 +225,18 @@ void CPU::ADC()
 	if (get_decimal())
 	{
 		// To be done
+		data = bus->read(data_address);
+		data = hex_to_bcd(data);
+		A = hex_to_bcd(A);
+		res = A + data + get_carry();
+		if (res > 99)
+		{
+			set_carry();
+			res %= 100;
+		}
+		else
+			clr_carry();
+		A = bcd_to_hex(res);
 	}
 	else
 	{
@@ -235,7 +257,7 @@ void CPU::ADC()
 
 void CPU::AND()
 {
-	A |= bus->read(data_address);
+	A &= bus->read(data_address);
 	update_NZflag(A);
 }
 
@@ -243,7 +265,7 @@ void CPU::ASL()
 {
 	if (addr_mode != AddrMode::ACCUMULATOR)
 		A = bus->read(data_address);
-	if (A >> 7)
+	if (A & 0x80)
 		set_carry();
 	else
 		clr_carry();
@@ -258,17 +280,17 @@ void CPU::BIT()
 	uint16_t data;
 
 	data = bus->read(data_address);
-	if (A | data)
+	if (A & data)
 		clr_zero();
 	else
 		set_zero();
 
-	if (data >> 6)
+	if (data & 0x80)
 		set_negative();
 	else
 		clr_negative();
 
-	if (data >> 5)
+	if (data & 0x40)
 		set_overflow();
 	else
 		clr_overflow();
@@ -682,27 +704,38 @@ void CPU::RTS()
 
 void CPU::SBC()
 {
-	uint16_t data, res;
+	uint8_t data, res;
 
 	data = bus->read(data_address);
 
 	if (get_decimal())
 	{
 		// To be done
+		data = bus->read(data_address);
+		data = hex_to_bcd(data);
+		A = hex_to_bcd(A);
+		res = A - data - 1 + get_carry() + 100;
+		if (A < data + 1 - get_carry())
+			clr_carry();
+		else
+			set_carry();
+		res %= 100;
+		A = bcd_to_hex(res);
 	}
 	else
 	{
 		// A-M-(1-C) = A + (~M) + C
-		res = (uint16_t)A + (~data) + get_carry();
+		res = A + (~data) + get_carry();
 		// 正数-负数=负数 或者 负数-正数=正数
 		if ((A ^ data) & (A ^ res) & 0x80)
 			set_overflow();
 		else
 			clr_overflow();
-		if (res > 0x00FF)
-			set_carry();
-		else
+		// 小于0有借位
+		if (A < data + 1 - get_carry())
 			clr_carry();
+		else
+			set_carry();
 		A = res;
 		update_NZflag(A);
 	}
